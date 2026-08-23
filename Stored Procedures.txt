@@ -1,0 +1,367 @@
+
+SET SERVEROUTPUT ON SIZE 1000000;
+
+-- ====================================================
+-- Procedure 1: Corporate Customers by Discount Threshold
+-- ====================================================
+CREATE OR REPLACE PROCEDURE usp_CorpCustByDiscount(
+    p_min_discount IN NUMBER
+)
+IS
+    v_customer_id Customer.CustomerID%TYPE;
+    v_customer_name VARCHAR2(101);
+    v_email Customer.Email%TYPE;
+    v_phone Customer.Phone%TYPE;
+    v_company_name Company.CompanyName%TYPE;
+    v_discount_rate VARCHAR2(10);
+    v_company_contact Company.ContactEmail%TYPE;
+    v_company_phone Company.ContactPhone%TYPE;
+    
+    CURSOR cur_corporate IS
+        SELECT 
+            c.CustomerID,
+            c.FirstName || ' ' || c.LastName AS CustomerName,
+            c.Email,
+            c.Phone,
+            co.CompanyName,
+            co.CorporateDiscountPercent || '%' AS DiscountRate,
+            co.ContactEmail AS CompanyContact,
+            co.ContactPhone AS CompanyPhone
+        FROM Customer c
+        INNER JOIN CorporateCustomer cc ON c.CustomerID = cc.CustomerID
+        INNER JOIN Company co ON cc.CompanyID = co.CompanyID
+        WHERE co.CorporateDiscountPercent >= p_min_discount
+            AND c.CustomerType = 'C'
+        ORDER BY co.CorporateDiscountPercent DESC, c.LastName;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('CORPORATE CUSTOMERS WITH DISCOUNT >= ' || p_min_discount || '%');
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+    
+    OPEN cur_corporate;
+    LOOP
+        FETCH cur_corporate INTO v_customer_id, v_customer_name, v_email, v_phone, 
+                                 v_company_name, v_discount_rate, v_company_contact, v_company_phone;
+        EXIT WHEN cur_corporate%NOTFOUND;
+        
+        DBMS_OUTPUT.PUT_LINE(
+            'Customer ID: ' || v_customer_id || ' | ' ||
+            'Name: ' || v_customer_name || ' | ' ||
+            'Email: ' || v_email || ' | ' ||
+            'Phone: ' || v_phone || ' | ' ||
+            'Company: ' || v_company_name || ' | ' ||
+            'Discount: ' || v_discount_rate || ' | ' ||
+            'Contact: ' || v_company_contact || ' | ' ||
+            'Company Phone: ' || v_company_phone
+        );
+    END LOOP;
+    CLOSE cur_corporate;
+    
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+END usp_CorpCustByDiscount;
+/
+
+-- ====================================================
+-- Procedure 2: Customers with Expiring Driver Licenses
+-- ====================================================
+CREATE OR REPLACE PROCEDURE usp_ExpiringLicenses(
+    p_days_ahead IN NUMBER
+)
+IS
+    v_customer_id Customer.CustomerID%TYPE;
+    v_customer_name VARCHAR2(101);
+    v_email Customer.Email%TYPE;
+    v_phone Customer.Phone%TYPE;
+    v_license_number DriverLicense.DriverLicenseNumber%TYPE;
+    v_license_state DriverLicense.DriverLicenseState%TYPE;
+    v_exp_date DriverLicense.DriverLicenseExpDate%TYPE;
+    v_days_until NUMBER;
+    v_priority VARCHAR2(30);
+    
+    CURSOR cur_expiring IS
+        SELECT 
+            c.CustomerID,
+            c.FirstName || ' ' || c.LastName AS CustomerName,
+            c.Email,
+            c.Phone,
+            dl.DriverLicenseNumber,
+            dl.DriverLicenseState,
+            dl.DriverLicenseExpDate,
+            TRUNC(dl.DriverLicenseExpDate - SYSDATE) AS DaysUntilExpiry,
+            CASE 
+                WHEN dl.DriverLicenseExpDate - SYSDATE <= 30 THEN 'URGENT - 30 days or less'
+                WHEN dl.DriverLicenseExpDate - SYSDATE <= 60 THEN 'WARNING - 60 days or less'
+                ELSE 'NOTIFY - ' || p_days_ahead || ' days or less'
+            END AS RenewalPriority
+        FROM Customer c
+        INNER JOIN DriverLicense dl ON c.DriverLicenseNumber = dl.DriverLicenseNumber
+        WHERE dl.DriverLicenseExpDate BETWEEN SYSDATE AND SYSDATE + p_days_ahead
+        ORDER BY dl.DriverLicenseExpDate;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('CUSTOMERS WITH LICENSES EXPIRING WITHIN ' || p_days_ahead || ' DAYS');
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+    
+    OPEN cur_expiring;
+    LOOP
+        FETCH cur_expiring INTO v_customer_id, v_customer_name, v_email, v_phone, 
+                               v_license_number, v_license_state, v_exp_date, v_days_until, v_priority;
+        EXIT WHEN cur_expiring%NOTFOUND;
+        
+        DBMS_OUTPUT.PUT_LINE(
+            'Customer ID: ' || v_customer_id || ' | ' ||
+            'Name: ' || v_customer_name || ' | ' ||
+            'License: ' || v_license_number || ' (' || v_license_state || ') | ' ||
+            'Expires: ' || TO_CHAR(v_exp_date, 'MM/DD/YYYY') || ' | ' ||
+            'Days Left: ' || v_days_until || ' | ' ||
+            'Priority: ' || v_priority || ' | ' ||
+            'Contact: ' || v_email || ' / ' || v_phone
+        );
+    END LOOP;
+    CLOSE cur_expiring;
+    
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+END usp_ExpiringLicenses;
+/
+
+-- ====================================================
+-- Procedure 3: High-Value Retail Customers by Points
+-- ====================================================
+CREATE OR REPLACE PROCEDURE usp_HighValRetailCust(
+    p_min_points IN NUMBER
+)
+IS
+    v_customer_id Customer.CustomerID%TYPE;
+    v_customer_name VARCHAR2(101);
+    v_email Customer.Email%TYPE;
+    v_phone Customer.Phone%TYPE;
+    v_location VARCHAR2(52);
+    v_rewards_code EZPlus.EZPlusRewardsCode%TYPE;
+    v_points EZPlus.EZPlusRewardsEarnedPoints%TYPE;
+    v_tier VARCHAR2(20);
+    
+    CURSOR cur_high_value IS
+        SELECT 
+            c.CustomerID,
+            c.FirstName || ' ' || c.LastName AS CustomerName,
+            c.Email,
+            c.Phone,
+            c.City || ', ' || c.StateCode AS Location,
+            e.EZPlusRewardsCode,
+            e.EZPlusRewardsEarnedPoints,
+            CASE 
+                WHEN e.EZPlusRewardsEarnedPoints >= 4000 THEN 'DIAMOND TIER'
+                WHEN e.EZPlusRewardsEarnedPoints >= 2000 THEN 'GOLD TIER'
+                WHEN e.EZPlusRewardsEarnedPoints >= 1000 THEN 'SILVER TIER'
+                ELSE 'BRONZE TIER'
+            END AS LoyaltyTier
+        FROM Customer c
+        INNER JOIN RetailCustomer rc ON c.CustomerID = rc.CustomerID
+        INNER JOIN EZPlus e ON rc.EZPlusID = e.EZPlusID
+        WHERE c.CustomerType = 'R'
+            AND e.EZPlusRewardsEarnedPoints >= p_min_points
+        ORDER BY e.EZPlusRewardsEarnedPoints DESC, c.LastName;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('HIGH-VALUE RETAIL CUSTOMERS (MIN ' || p_min_points || ' POINTS)');
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+    
+    OPEN cur_high_value;
+    LOOP
+        FETCH cur_high_value INTO v_customer_id, v_customer_name, v_email, v_phone, 
+                                 v_location, v_rewards_code, v_points, v_tier;
+        EXIT WHEN cur_high_value%NOTFOUND;
+        
+        DBMS_OUTPUT.PUT_LINE(
+            'Customer ID: ' || v_customer_id || ' | ' ||
+            'Name: ' || v_customer_name || ' | ' ||
+            'Location: ' || v_location || ' | ' ||
+            'Rewards Code: ' || v_rewards_code || ' | ' ||
+            'Points: ' || v_points || ' | ' ||
+            'Tier: ' || v_tier || ' | ' ||
+            'Contact: ' || v_email || ' / ' || v_phone
+        );
+    END LOOP;
+    CLOSE cur_high_value;
+    
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+END usp_HighValRetailCust;
+/
+
+-- ====================================================
+-- Procedure 4: Credit Cards with Low Available Credit
+-- ====================================================
+CREATE OR REPLACE PROCEDURE usp_CreditRiskCustomers(
+    p_max_percentage IN NUMBER
+)
+IS
+    v_customer_id Customer.CustomerID%TYPE;
+    v_customer_name VARCHAR2(101);
+    v_email Customer.Email%TYPE;
+    v_phone Customer.Phone%TYPE;
+    v_card_number CreditCard.CreditCardNumber%TYPE;
+    v_card_owner CreditCard.CreditCardOwnerName%TYPE;
+    v_card_limit CreditCard.CreditCardLimit%TYPE;
+    v_available_credit CreditCard.CC_AvailCredit%TYPE;
+    v_percentage NUMBER;
+    v_status VARCHAR2(30);
+    v_network VARCHAR2(50);
+    v_bank VARCHAR2(50);
+    
+    CURSOR cur_credit_risk IS
+        SELECT 
+            c.CustomerID,
+            c.FirstName || ' ' || c.LastName AS CustomerName,
+            c.Email,
+            c.Phone,
+            cc.CreditCardNumber,
+            cc.CreditCardOwnerName,
+            cc.CreditCardLimit,
+            cc.CC_AvailCredit,
+            ROUND((cc.CC_AvailCredit / cc.CreditCardLimit) * 100, 2) AS AvailablePercentage,
+            CASE 
+                WHEN (cc.CC_AvailCredit / cc.CreditCardLimit) * 100 < 10 THEN 'CRITICAL - Less than 10%'
+                WHEN (cc.CC_AvailCredit / cc.CreditCardLimit) * 100 < 20 THEN 'WARNING - Less than 20%'
+                ELSE 'MONITOR - Below ' || p_max_percentage || '%'
+            END AS CreditStatus,
+            ccnet.CreditCardNetworkCompanyName AS CardNetwork,
+            cciss.CreditCardIssuingBankName AS IssuingBank
+        FROM Customer c
+        INNER JOIN Customer_CreditCard ccc ON c.CustomerID = ccc.CustomerID
+        INNER JOIN CreditCard cc ON ccc.CreditCardNumber = cc.CreditCardNumber
+        INNER JOIN CreditCardNetworkCompany ccnet ON cc.CCN_Code = ccnet.CreditCardNetworkCompanyCode
+        INNER JOIN CreditCardIssuingBank cciss ON cc.CCI_Code = cciss.CreditCardIssuingBankCode
+        WHERE cc.ActivationStatus = 1
+            AND (cc.CC_AvailCredit / cc.CreditCardLimit) * 100 < p_max_percentage
+        ORDER BY AvailablePercentage;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('CREDIT RISK CUSTOMERS (AVAILABLE CREDIT < ' || p_max_percentage || '%)');
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+    
+    OPEN cur_credit_risk;
+    LOOP
+        FETCH cur_credit_risk INTO v_customer_id, v_customer_name, v_email, v_phone, 
+                                  v_card_number, v_card_owner, v_card_limit, v_available_credit, 
+                                  v_percentage, v_status, v_network, v_bank;
+        EXIT WHEN cur_credit_risk%NOTFOUND;
+        
+        DBMS_OUTPUT.PUT_LINE(
+            'Customer ID: ' || v_customer_id || ' | ' ||
+            'Name: ' || v_customer_name || ' | ' ||
+            'Card: ' || SUBSTR(v_card_number, 1, 4) || '****' || SUBSTR(v_card_number, -4) || ' | ' ||
+            'Owner: ' || v_card_owner || ' | ' ||
+            'Limit: $' || v_card_limit || ' | ' ||
+            'Available: $' || v_available_credit || ' | ' ||
+            'Available %: ' || v_percentage || '% | ' ||
+            'Status: ' || v_status || ' | ' ||
+            'Network: ' || v_network || ' | ' ||
+            'Bank: ' || v_bank
+        );
+    END LOOP;
+    CLOSE cur_credit_risk;
+    
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+END usp_CreditRiskCustomers;
+/
+
+-- ====================================================
+-- Procedure 5: Discount Performance Analysis
+-- ====================================================
+CREATE OR REPLACE PROCEDURE usp_DiscountPerformance
+IS
+    v_discount_id Discount.DiscountID%TYPE;
+    v_discount_code Discount.DiscountCode%TYPE;
+    v_description Discount.DiscountCodeDesc%TYPE;
+    v_total_submitted NUMBER;
+    v_total_redeemed NUMBER;
+    v_total_unredeemed NUMBER;
+    v_redemption_rate NUMBER;
+    v_first_submission DATE;
+    v_last_submission DATE;
+    
+    CURSOR cur_discounts IS
+        SELECT 
+            d.DiscountID,
+            d.DiscountCode,
+            d.DiscountCodeDesc,
+            COUNT(rcd.RetailCustomerDiscountID) AS TotalSubmitted,
+            COUNT(CASE WHEN rcd.DiscountRedeemedDate IS NOT NULL THEN 1 END) AS TotalRedeemed,
+            COUNT(CASE WHEN rcd.DiscountRedeemedDate IS NULL THEN 1 END) AS TotalUnredeemed,
+            ROUND(
+                COUNT(CASE WHEN rcd.DiscountRedeemedDate IS NOT NULL THEN 1 END) * 100.0 / 
+                NULLIF(COUNT(rcd.RetailCustomerDiscountID), 0), 2
+            ) AS RedemptionRate,
+            MIN(rcd.DiscountSubmittedDate) AS FirstSubmission,
+            MAX(rcd.DiscountSubmittedDate) AS LastSubmission
+        FROM Discount d
+        LEFT JOIN RetailCustomer_Discount rcd ON d.DiscountID = rcd.DiscountID
+        GROUP BY d.DiscountID, d.DiscountCode, d.DiscountCodeDesc
+        ORDER BY TotalUnredeemed DESC, RedemptionRate;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('DISCOUNT PERFORMANCE ANALYSIS');
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+    DBMS_OUTPUT.PUT_LINE('ID | Code | Description | Submitted | Redeemed | Unredeemed | Rate | First Used | Last Used');
+    DBMS_OUTPUT.PUT_LINE('-----------------------------------------------------------------------');
+    
+    OPEN cur_discounts;
+    LOOP
+        FETCH cur_discounts INTO v_discount_id, v_discount_code, v_description, 
+                                 v_total_submitted, v_total_redeemed, v_total_unredeemed,
+                                 v_redemption_rate, v_first_submission, v_last_submission;
+        EXIT WHEN cur_discounts%NOTFOUND;
+        
+        DBMS_OUTPUT.PUT_LINE(
+            RPAD(v_discount_id, 3) || ' | ' ||
+            RPAD(v_discount_code, 10) || ' | ' ||
+            RPAD(SUBSTR(v_description, 1, 30), 30) || ' | ' ||
+            RPAD(v_total_submitted, 9) || ' | ' ||
+            RPAD(v_total_redeemed, 7) || ' | ' ||
+            RPAD(v_total_unredeemed, 9) || ' | ' ||
+            RPAD(NVL(TO_CHAR(v_redemption_rate), '0.00') || '%', 6) || ' | ' ||
+            RPAD(TO_CHAR(v_first_submission, 'MM/DD/YYYY'), 10) || ' | ' ||
+            TO_CHAR(v_last_submission, 'MM/DD/YYYY')
+        );
+    END LOOP;
+    CLOSE cur_discounts;
+    
+    DBMS_OUTPUT.PUT_LINE('=======================================================================');
+END usp_DiscountPerformance;
+/
+
+    
+BEGIN
+    -- Test Procedure 1
+    DBMS_OUTPUT.PUT_LINE('1. CORPORATE CUSTOMERS WITH 15%+ DISCOUNT');
+    DBMS_OUTPUT.PUT_LINE('-----------------------------------------');
+    usp_CorpCustByDiscount(15);
+ END;
+/   
+BEGIN
+    -- Test Procedure 2  
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('2. CUSTOMERS WITH LICENSES EXPIRING IN 180 DAYS');
+    DBMS_OUTPUT.PUT_LINE('-----------------------------------------');
+    usp_ExpiringLicenses(180);
+END;
+/
+BEGIN    
+    -- Test Procedure 3
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('3. HIGH-VALUE RETAIL CUSTOMERS (500+ POINTS)');
+    DBMS_OUTPUT.PUT_LINE('-----------------------------------------');
+    usp_HighValRetailCust(500);
+END;
+/  
+BEGIN 
+    -- Test Procedure 4
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('4. CREDIT RISK CUSTOMERS (<95% AVAILABLE)');
+    DBMS_OUTPUT.PUT_LINE('-----------------------------------------');
+    usp_CreditRiskCustomers(95);   
+END;
+/
+BEGIN
+    -- Test Procedure 5
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('5. DISCOUNT PERFORMANCE ANALYSIS');
+    DBMS_OUTPUT.PUT_LINE('-----------------------------------------');
+    usp_DiscountPerformance;
+END;
+/

@@ -1,0 +1,114 @@
+#1: Corporate Customers with High Corporate Discount Rates
+SELECT 
+    c.CustomerID,
+    c.FirstName || ' ' || c.LastName AS CustomerName,
+    c.Email,
+    c.Phone,
+    co.CompanyName,
+    co.CorporateDiscountPercent || '%' AS DiscountRate,
+    co.ContactEmail AS CompanyContact,
+    co.ContactPhone AS CompanyPhone
+FROM Customer c
+INNER JOIN CorporateCustomer cc ON c.CustomerID = cc.CustomerID
+INNER JOIN Company co ON cc.CompanyID = co.CompanyID
+WHERE co.CorporateDiscountPercent >= 15
+    AND c.CustomerType = 'C'
+ORDER BY co.CorporateDiscountPercent DESC, c.LastName;
+
+
+#2: Customers with Driver Licenses Expiring Soon
+SELECT 
+    c.CustomerID,
+    c.FirstName || ' ' || c.LastName AS CustomerName,
+    c.Email,
+    c.Phone,
+    dl.DriverLicenseNumber,
+    dl.DriverLicenseState,
+    dl.DriverLicenseExpDate,
+    TRUNC(dl.DriverLicenseExpDate - SYSDATE) AS DaysUntilExpiry,
+    CASE 
+        WHEN dl.DriverLicenseExpDate - SYSDATE <= 30 THEN 'URGENT - 30 days or less'
+        WHEN dl.DriverLicenseExpDate - SYSDATE <= 60 THEN 'WARNING - 60 days or less'
+        ELSE 'NOTIFY - 90 days or less'
+    END AS RenewalPriority
+FROM Customer c
+INNER JOIN DriverLicense dl ON c.DriverLicenseNumber = dl.DriverLicenseNumber
+WHERE dl.DriverLicenseExpDate BETWEEN SYSDATE AND SYSDATE + 90
+ORDER BY dl.DriverLicenseExpDate;
+
+
+#3: High-Value Retail Customers by EZPlus Points
+SELECT 
+    c.CustomerID,
+    c.FirstName || ' ' || c.LastName AS CustomerName,
+    c.Email,
+    c.Phone,
+    c.City || ', ' || c.StateCode AS Location,
+    rc.RetailCustomerID,
+    e.EZPlusRewardsCode,
+    e.EZPlusRewardsEarnedPoints,
+    CASE 
+        WHEN e.EZPlusRewardsEarnedPoints >= 4000 THEN 'DIAMOND TIER'
+        WHEN e.EZPlusRewardsEarnedPoints >= 2000 THEN 'GOLD TIER'
+        WHEN e.EZPlusRewardsEarnedPoints >= 1000 THEN 'SILVER TIER'
+        ELSE 'BRONZE TIER'
+    END AS LoyaltyTier
+FROM Customer c
+INNER JOIN RetailCustomer rc ON c.CustomerID = rc.CustomerID
+INNER JOIN EZPlus e ON rc.EZPlusID = e.EZPlusID
+WHERE c.CustomerType = 'R'
+    AND e.EZPlusRewardsEarnedPoints >= 500
+ORDER BY e.EZPlusRewardsEarnedPoints DESC, c.LastName;
+
+
+
+#4: Credit Cards with Low Available Credit
+SELECT 
+    c.CustomerID,
+    c.FirstName || ' ' || c.LastName AS CustomerName,
+    c.Email,
+    c.Phone,
+    cc.CreditCardNumber,
+    cc.CreditCardOwnerName,
+    cc.CreditCardLimit,
+    cc.CC_AvailCredit,
+    ROUND((cc.CC_AvailCredit / cc.CreditCardLimit) * 100, 2) AS AvailablePercentage,
+    CASE 
+        WHEN (cc.CC_AvailCredit / cc.CreditCardLimit) * 100 < 10 THEN 'CRITICAL - Less than 10%'
+        WHEN (cc.CC_AvailCredit / cc.CreditCardLimit) * 100 < 20 THEN 'WARNING - Less than 20%'
+        ELSE 'MONITOR - Below 30%'
+    END AS CreditStatus,
+    ccnet.CreditCardNetworkCompanyName AS CardNetwork,
+    cciss.CreditCardIssuingBankName AS IssuingBank
+FROM Customer c
+INNER JOIN Customer_CreditCard ccc ON c.CustomerID = ccc.CustomerID
+INNER JOIN CreditCard cc ON ccc.CreditCardNumber = cc.CreditCardNumber
+INNER JOIN CreditCardNetworkCompany ccnet ON cc.CCN_Code = ccnet.CreditCardNetworkCompanyCode
+INNER JOIN CreditCardIssuingBank cciss ON cc.CCI_Code = cciss.CreditCardIssuingBankCode
+WHERE cc.ActivationStatus = 1
+    AND (cc.CC_AvailCredit / cc.CreditCardLimit) * 100 < 80
+ORDER BY AvailablePercentage;
+
+
+
+#5: Analysis of Unredeemed Discounts
+SELECT 
+    d.DiscountID,
+    d.DiscountCode,
+    d.DiscountCodeDesc,
+    COUNT(rcd.RetailCustomerDiscountID) AS TotalSubmitted,
+    COUNT(CASE WHEN rcd.DiscountRedeemedDate IS NOT NULL THEN 1 END) AS TotalRedeemed,
+    COUNT(CASE WHEN rcd.DiscountRedeemedDate IS NULL THEN 1 END) AS TotalUnredeemed,
+    ROUND(
+        COUNT(CASE WHEN rcd.DiscountRedeemedDate IS NOT NULL THEN 1 END) * 100.0 / 
+        COUNT(rcd.RetailCustomerDiscountID), 2
+    ) AS RedemptionRate,
+    MIN(rcd.DiscountSubmittedDate) AS FirstSubmission,
+    MAX(rcd.DiscountSubmittedDate) AS LastSubmission
+FROM Discount d
+LEFT JOIN RetailCustomer_Discount rcd ON d.DiscountID = rcd.DiscountID
+GROUP BY d.DiscountID, d.DiscountCode, d.DiscountCodeDesc
+HAVING COUNT(rcd.RetailCustomerDiscountID) > 0
+ORDER BY TotalUnredeemed DESC, RedemptionRate;
+
+
